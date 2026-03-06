@@ -16,6 +16,9 @@ GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
 # Outlook
 OUTLOOK_PROFILE_NAME = os.getenv("OUTLOOK_PROFILE_NAME", "Outlook")
 
+# Claude API (メール文面自動生成用)
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
 # 送信制御ルール
 SEND_RULES = {
     "allowed_days": [0, 1, 2, 3, 4],  # 月〜金 (0=月曜)
