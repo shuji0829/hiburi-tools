@@ -226,11 +226,21 @@ class GoogleMapsClient:
     def __init__(self, api_key: str | None = None, dry_run: bool = True):
         self.api_key = api_key or GOOGLE_MAPS_API_KEY
         self.dry_run = dry_run
+        self.has_api_key = bool(self.api_key)
+        if not self.has_api_key and not self.dry_run:
+            logger.warning(
+                "GOOGLE_MAPS_API_KEY が未設定です。"
+                "CSVの座標情報を使い、サンプルデータでフォールバックします。"
+            )
 
     def geocode_station(self, station_name: str) -> dict | None:
         """駅名から緯度経度を取得"""
         if self.dry_run:
             logger.info(f"[DRY_RUN] ジオコーディングスキップ: {station_name}駅")
+            return None
+
+        if not self.has_api_key:
+            logger.warning(f"[FALLBACK] APIキー未設定のためジオコーディング不可: {station_name}駅（CSVの座標を使用してください）")
             return None
 
         params = {
@@ -254,6 +264,10 @@ class GoogleMapsClient:
         """指定座標の半径500m圏内の事業者を検索"""
         if self.dry_run:
             logger.info(f"[DRY_RUN] Places API検索スキップ: {station_name}駅 ({lat}, {lng})")
+            return self._generate_sample_businesses(station_name)
+
+        if not self.has_api_key:
+            logger.warning(f"[FALLBACK] APIキー未設定のためPlaces API検索不可: {station_name}駅 → サンプルデータで代替")
             return self._generate_sample_businesses(station_name)
 
         all_results = []
@@ -308,6 +322,10 @@ class GoogleMapsClient:
                 "website": "https://example.com",
                 "email": "",
             }
+
+        if not self.has_api_key:
+            logger.info(f"[FALLBACK] APIキー未設定のため詳細情報取得不可: {place_id}")
+            return {"phone": "", "website": "", "email": ""}
 
         params = {
             "place_id": place_id,
