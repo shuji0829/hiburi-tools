@@ -14,16 +14,22 @@ NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID", "")
 NOTION_API_URL = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
 
-# Excel列名 → Notionプロパティ名のマッピング
-# サンプル形式: Excel列名がそのままNotionプロパティ名
-COLUMN_MAPPING = {
+# Excel列名 → Notionプロパティ名のマッピング（複数の列名に対応）
+# キー: Excelで使われうる列名, 値: Notionプロパティ名
+COLUMN_ALIASES = {
+    "施設名": "事業者名",
     "事業者名": "事業者名",
     "メールアドレス": "メールアドレス",
+    "区分": "カテゴリ",
     "カテゴリ": "カテゴリ",
+    "指定種別": "パイプライン",
     "パイプライン": "パイプライン",
     "住所": "住所",
     "データソース": "データソース",
 }
+
+# データソースのデフォルト値（Excelにデータソース列がない場合に使用）
+DEFAULT_DATA_SOURCE = "厚労省新規指定"
 
 # Notionプロパティ名 → タイプ定義
 PROPERTY_TYPES = {
@@ -45,11 +51,13 @@ def get_headers():
 
 
 def build_notion_properties(row_data):
-    """Excel行データからNotionプロパティを構築する（6プロパティのみ）"""
+    """Excel行データからNotionプロパティを構築する"""
     properties = {}
 
-    for excel_col, notion_prop in COLUMN_MAPPING.items():
-        value = row_data.get(excel_col)
+    for excel_col, value in row_data.items():
+        notion_prop = COLUMN_ALIASES.get(excel_col)
+        if not notion_prop:
+            continue
         if value is None or (isinstance(value, str) and value.strip() == ""):
             continue
         value = str(value).strip()
@@ -63,12 +71,16 @@ def build_notion_properties(row_data):
         elif prop_type == "rich_text":
             properties[notion_prop] = {"rich_text": [{"text": {"content": value}}]}
 
+    # データソース列がExcelにない場合はデフォルト値を設定
+    if "データソース" not in properties:
+        properties["データソース"] = {"select": {"name": DEFAULT_DATA_SOURCE}}
+
     return properties
 
 
 def get_business_name(row_data):
-    """行データから事業者名を取得"""
-    name = row_data.get("事業者名")
+    """行データから事業者名を取得（施設名・事業者名どちらにも対応）"""
+    name = row_data.get("事業者名") or row_data.get("施設名")
     if name and isinstance(name, str):
         name = name.strip()
     return name if name else None
@@ -119,7 +131,7 @@ def update_page(page_id, properties):
 
 def find_header_row(rows):
     """ヘッダー行を自動検出（施設名・メールアドレス等が含まれる行）"""
-    search_keys = {"事業者名", "メールアドレス", "住所", "カテゴリ", "パイプライン", "データソース"}
+    search_keys = set(COLUMN_ALIASES.keys())
     for idx, row in enumerate(rows):
         cells = [str(c).strip() if c else "" for c in row]
         matched = [c for c in cells if c in search_keys]
@@ -152,7 +164,7 @@ def read_excel(file_path, sheet_name, header_row=None):
         print(f"  ヘッダー行を自動検出: {h_idx + 1}行目")
 
     headers = [str(h).strip() if h else "" for h in rows[h_idx]]
-    allowed_columns = set(COLUMN_MAPPING.keys())
+    allowed_columns = set(COLUMN_ALIASES.keys())
     matched = [h for h in headers if h in allowed_columns]
     ignored = [h for h in headers if h and h not in allowed_columns]
     print(f"  マッピング対象列: {matched}")
