@@ -24,6 +24,7 @@ except ImportError:
 from config import (
     SCHEDULE_SCRAPER_DAY, SCHEDULE_SCRAPER_TIME,
     SCHEDULE_SYNC_TIME, SCHEDULE_PIPELINE_TIME,
+    SCHEDULE_HP_SEARCH_TIME, HP_SEARCH_DAILY_LIMIT, HP_SEARCH_EXCEL,
 )
 
 # ログ設定
@@ -48,6 +49,14 @@ PYTHON = sys.executable
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 TASKS = {
+    "hp_search": {
+        "name": "HP・メール検索",
+        "command": [PYTHON, os.path.join(BASE_DIR, "hp_search.py"),
+                    "--input", os.path.join(BASE_DIR, HP_SEARCH_EXCEL),
+                    "--resume", "--limit", str(HP_SEARCH_DAILY_LIMIT)],
+        "schedule": f"毎日 {SCHEDULE_HP_SEARCH_TIME}",
+        "timeout": 3600,  # 1時間
+    },
     "scraper": {
         "name": "厚生局スクレイパー",
         "command": [PYTHON, os.path.join(BASE_DIR, "厚生局スクレイパー.py"),
@@ -57,20 +66,21 @@ TASKS = {
     "sync": {
         "name": "Excel→Notion同期",
         "command": [PYTHON, os.path.join(BASE_DIR, "notion_sync.py"),
-                    "--excel", os.path.join(BASE_DIR, "営業リスト_sample.xlsx"),
-                    "--sheet", "Sheet1"],
+                    "--excel", os.path.join(BASE_DIR, HP_SEARCH_EXCEL),
+                    "--sheet", "新規指定一覧"],
         "schedule": f"毎日 {SCHEDULE_SYNC_TIME}",
     },
     "reverse_sync": {
         "name": "Notion→Excel逆同期",
         "command": [PYTHON, os.path.join(BASE_DIR, "notion_sync.py"),
-                    "--excel", os.path.join(BASE_DIR, "営業リスト_sample.xlsx"),
-                    "--sheet", "Sheet1", "--reverse"],
+                    "--excel", os.path.join(BASE_DIR, HP_SEARCH_EXCEL),
+                    "--sheet", "新規指定一覧", "--reverse"],
         "schedule": f"毎日 {SCHEDULE_SYNC_TIME} (同期後)",
     },
     "pipeline": {
-        "name": "営業自動化パイプライン",
-        "command": [PYTHON, os.path.join(BASE_DIR, "営業自動化パイプライン.py")],
+        "name": "営業メール一斉送信",
+        "command": [PYTHON, os.path.join(BASE_DIR, "営業自動化パイプライン.py"),
+                    "--stage", "新規"],
         "schedule": f"毎日 {SCHEDULE_PIPELINE_TIME}",
     },
 }
@@ -85,11 +95,12 @@ def run_task(task_key):
 
     logger.info(f"=== {task['name']} 開始 ===")
     try:
+        task_timeout = task.get("timeout", 600)
         result = subprocess.run(
             task["command"],
             capture_output=True,
             text=True,
-            timeout=600,  # 10分タイムアウト
+            timeout=task_timeout,
             cwd=BASE_DIR,
         )
         if result.stdout:
@@ -114,7 +125,7 @@ def run_all():
     """全タスクを順次実行"""
     logger.info(f"===== 全タスク実行開始 ({datetime.now():%Y-%m-%d %H:%M}) =====")
     results = {}
-    for key in ["scraper", "sync", "pipeline", "reverse_sync"]:
+    for key in ["hp_search", "scraper", "sync", "pipeline", "reverse_sync"]:
         results[key] = run_task(key)
 
     logger.info("===== 実行結果サマリー =====")
@@ -125,9 +136,9 @@ def run_all():
 
 
 def run_daily():
-    """日次タスク（スクレイパー以外）"""
+    """日次タスク: HP検索 → Notion同期 → メール送信 → 逆同期"""
     logger.info(f"===== 日次タスク開始 ({datetime.now():%Y-%m-%d %H:%M}) =====")
-    for key in ["sync", "pipeline", "reverse_sync"]:
+    for key in ["hp_search", "sync", "pipeline", "reverse_sync"]:
         run_task(key)
 
 
@@ -148,7 +159,11 @@ def start_scheduler():
     for key, task in TASKS.items():
         logger.info(f"  {task['name']}: {task['schedule']}")
 
-    # 日次タスク
+    # HP検索（早朝）
+    schedule.every().day.at(SCHEDULE_HP_SEARCH_TIME).do(
+        lambda: run_task("hp_search"))
+
+    # 日次タスク（同期→メール送信→逆同期）
     schedule.every().day.at(SCHEDULE_SYNC_TIME).do(run_daily)
 
     # 月次タスク（毎月1日）
