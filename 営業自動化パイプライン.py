@@ -42,24 +42,22 @@ SEND_LOG_FILE = os.path.join(
     LOG_DIR, f"email_send_{datetime.now():%Y%m%d}.csv"
 )
 
-# パイプライン定義
+# パイプライン定義（クリニック顧客データベースの「ステータス」に対応）
+# ステータス: リード → 見込み → アクティブ顧客 / 非アクティブ顧客
 PIPELINE_STAGES = {
-    "新規": {
+    "リード": {
         "action": "initial_outreach",
-        "next_stage": "連絡済み",
+        "next_stage": "見込み",
         "description": "初回営業メール送信",
     },
-    "連絡済み": {
+    "見込み": {
         "action": "followup",
-        "next_stage": "フォローアップ",
+        "next_stage": "見込み",
         "description": "フォローアップメール送信",
     },
-    "フォローアップ": {
-        "action": "final_followup",
-        "next_stage": "休止",
-        "description": "最終フォローアップ → 休止",
-    },
 }
+# 旧ステージ名との互換性
+PIPELINE_STAGES["新規"] = PIPELINE_STAGES["リード"]
 
 # カテゴリ別メールテンプレート
 # {カテゴリキーワード: テンプレートセット名}
@@ -220,9 +218,9 @@ def log_send(name, email, stage, action, status, error_msg=""):
 
 def process_stage(page, stage_config, dry_run=False):
     """1レコードのパイプライン処理"""
-    name = page.get("事業者名", "不明")
+    name = page.get("会社名", "") or page.get("事業者名", "不明")
     email = page.get("メールアドレス", "")
-    category = page.get("カテゴリ", "")
+    category = page.get("診療科目", "") or page.get("カテゴリ", "")
     page_id = page["_page_id"]
     action = stage_config["action"]
     next_stage = stage_config["next_stage"]
@@ -241,8 +239,8 @@ def process_stage(page, stage_config, dry_run=False):
         print(f"  [{name}] テンプレートなし: {template_key}")
         return "no_template"
 
-    subject = template["subject"].format(事業者名=name)
-    body = template["body"].format(事業者名=name)
+    subject = template["subject"].format(事業者名=name, 会社名=name)
+    body = template["body"].format(事業者名=name, 会社名=name)
 
     if dry_run:
         print(f"  [{name}] → {email} (テンプレート: {template_key})")
@@ -255,7 +253,7 @@ def process_stage(page, stage_config, dry_run=False):
         print(f"  [{name}] 送信完了 → {email}")
 
         # Notionステータス更新
-        properties = {"パイプライン": {"select": {"name": next_stage}}}
+        properties = {"ステータス": {"select": {"name": next_stage}}}
         update_page(page_id, properties)
 
         log_send(name, email, current_stage, action, "success")
@@ -288,7 +286,7 @@ def run_pipeline(target_stage=None, dry_run=False, limit=None):
     stage_counts = {}
     email_counts = {}
     for page in pages:
-        stage = page.get("パイプライン", "未設定")
+        stage = page.get("ステータス", "") or page.get("パイプライン", "未設定")
         stage_counts[stage] = stage_counts.get(stage, 0) + 1
         if page.get("メールアドレス"):
             email_counts[stage] = email_counts.get(stage, 0) + 1
@@ -311,7 +309,7 @@ def run_pipeline(target_stage=None, dry_run=False, limit=None):
             print(f"\n送信上限 ({limit} 件) に達しました。残りは次回実行で処理します。")
             break
 
-        stage = page.get("パイプライン", "")
+        stage = page.get("ステータス", "") or page.get("パイプライン", "")
         if stage not in PIPELINE_STAGES:
             continue
         if target_stage and stage != target_stage:

@@ -38,10 +38,10 @@ def compute_diff(excel_rows, notion_pages):
         unchanged: 両方にあり値が同じレコード
         deleted_names: Notionにあり Excel にないレコード名 [(name, page_id)]
     """
-    # Notionページを事業者名でインデックス化
+    # Notionページを事業者名（会社名）でインデックス化
     notion_by_name = {}
     for page in notion_pages:
-        name = page.get("事業者名", "").strip()
+        name = (page.get("会社名", "") or page.get("事業者名", "")).strip()
         if name:
             notion_by_name[name] = page
 
@@ -196,7 +196,7 @@ def sync_notion_to_excel(file_path, sheet_name, dry_run=False, header_row=None):
         updates = []
         new_pages = []
         for page in notion_pages:
-            name = page.get("事業者名", "").strip()
+            name = (page.get("会社名", "") or page.get("事業者名", "")).strip()
             if not name:
                 continue
             if name in excel_names:
@@ -207,9 +207,9 @@ def sync_notion_to_excel(file_path, sheet_name, dry_run=False, header_row=None):
         if dry_run:
             print(f"\n[DRY-RUN] 更新: {len(updates)} 件, 新規追加: {len(new_pages)} 件")
             for page in updates[:10]:
-                print(f"  [更新(予定)] {page.get('事業者名')}")
+                print(f"  [更新(予定)] {page.get('会社名') or page.get('事業者名')}")
             for page in new_pages[:10]:
-                print(f"  [新規追加(予定)] {page.get('事業者名')}")
+                print(f"  [新規追加(予定)] {page.get('会社名') or page.get('事業者名')}")
             return
 
         updated_count = 0

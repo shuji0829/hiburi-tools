@@ -41,10 +41,14 @@ def build_notion_properties(row_data):
             properties[notion_prop] = {"phone_number": value}
         elif prop_type == "url":
             properties[notion_prop] = {"url": value}
+        elif prop_type == "multi_select":
+            # カンマ区切りまたはスペース区切りの値を分割
+            names = [v.strip() for v in value.replace("、", ",").split(",") if v.strip()]
+            properties[notion_prop] = {"multi_select": [{"name": n} for n in names]}
 
-    # データソース列がない場合はデフォルト値を設定
-    if "データソース" not in properties:
-        properties["データソース"] = {"select": {"name": DEFAULT_DATA_SOURCE}}
+    # リードソース列がない場合はデフォルト値を設定
+    if "リードソース" not in properties:
+        properties["リードソース"] = {"select": {"name": DEFAULT_DATA_SOURCE}}
 
     return properties
 
@@ -68,6 +72,9 @@ def parse_notion_property(prop_name, prop_data):
         return prop_data.get("phone_number") or ""
     elif prop_type == "url":
         return prop_data.get("url") or ""
+    elif prop_type == "multi_select":
+        ms_list = prop_data.get("multi_select", [])
+        return ", ".join(item["name"] for item in ms_list) if ms_list else ""
     return ""
 
 
@@ -85,7 +92,8 @@ def query_existing_pages():
         resp.raise_for_status()
         data = resp.json()
         for page in data.get("results", []):
-            title_prop = page["properties"].get("事業者名", {})
+            # タイトルプロパティを探す（会社名 or 事業者名）
+            title_prop = page["properties"].get("会社名") or page["properties"].get("事業者名", {})
             title_list = title_prop.get("title", [])
             if title_list:
                 name = title_list[0].get("plain_text", "")

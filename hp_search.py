@@ -247,7 +247,25 @@ def main():
     ws = wb[args.sheet]
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=args.headless)
+        # 利用可能なChromiumバイナリを検出
+        import glob
+        chromium_path = None
+        cache_dir = os.path.expanduser("~/.cache/ms-playwright")
+        for pattern in [
+            f"{cache_dir}/chromium-*/chrome-linux/chrome",
+            f"{cache_dir}/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell",
+        ]:
+            matches = sorted(glob.glob(pattern), reverse=True)
+            if matches:
+                chromium_path = matches[0]
+                break
+
+        launch_opts = {"headless": args.headless}
+        if chromium_path:
+            launch_opts["executable_path"] = chromium_path
+            print(f"Chromiumパス: {chromium_path}")
+
+        browser = p.chromium.launch(**launch_opts)
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             locale="ja-JP",
