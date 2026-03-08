@@ -163,6 +163,7 @@ def sync(file_path, sheet_name):
     created = 0
     updated = 0
     skipped = 0
+    failed = 0
 
     for i, row in enumerate(rows, 1):
         name = row.get("事業者名")
@@ -173,16 +174,21 @@ def sync(file_path, sheet_name):
         name = str(name).strip()
         properties = build_notion_properties(row)
 
-        if name in existing:
-            print(f"  [{i}/{len(rows)}] 更新: {name}")
-            update_page(existing[name], properties)
-            updated += 1
-        else:
-            print(f"  [{i}/{len(rows)}] 新規作成: {name}")
-            create_page(properties)
-            created += 1
+        try:
+            if name in existing:
+                print(f"  [{i}/{len(rows)}] 更新: {name}")
+                update_page(existing[name], properties)
+                updated += 1
+            else:
+                print(f"  [{i}/{len(rows)}] 新規作成: {name}")
+                create_page(properties)
+                created += 1
+        except Exception as e:
+            print(f"  [{i}/{len(rows)}] エラー: {name} - {e}")
+            failed += 1
 
-    print(f"\n同期完了: 新規 {created} 件, 更新 {updated} 件, スキップ {skipped} 件")
+    print(f"\n同期完了: 成功 {created + updated} 件 (新規 {created}, 更新 {updated}), "
+          f"失敗 {failed} 件, スキップ {skipped} 件")
 
 
 if __name__ == "__main__":
