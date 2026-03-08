@@ -3,6 +3,17 @@ HIBURI Tools 共通設定
 """
 
 import os
+from pathlib import Path
+
+# .envファイルの読み込み（python-dotenvが無くても動作）
+_env_path = Path(__file__).parent / ".env"
+if _env_path.exists():
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _key, _, _val = _line.partition("=")
+                os.environ.setdefault(_key.strip(), _val.strip())
 
 # Notion API 設定
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
