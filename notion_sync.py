@@ -7,7 +7,6 @@ import os
 import sys
 import requests
 import openpyxl
-from datetime import date
 
 
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
@@ -134,11 +133,12 @@ def read_excel(file_path, sheet_name):
         return []
 
     headers = [str(h).strip() if h else "" for h in rows[0]]
+    allowed_columns = set(COLUMN_MAPPING.keys())
     data = []
     for row in rows[1:]:
         row_dict = {}
         for i, header in enumerate(headers):
-            if header and i < len(row):
+            if header in allowed_columns and i < len(row):
                 row_dict[header] = row[i]
         if any(v is not None for v in row_dict.values()):
             data.append(row_dict)
