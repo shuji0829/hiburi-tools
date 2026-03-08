@@ -1,14 +1,5 @@
 """
-Excel → Notion 同期スクリプト
-営業リストExcelファイルをNotionデータベースに同期する
-
-使い方:
-  python notion_sync.py --excel "営業リスト.xlsx" --sheet "営業リスト"
-  python notion_sync.py --excel "営業リスト.xlsx" --sheet "営業リスト" --dry-run
-
-環境変数:
-  NOTION_TOKEN       - Notion APIトークン
-  NOTION_DATABASE_ID - 同期先データベースID
+Excel to Notion sync script
 """
 
 import argparse
@@ -23,23 +14,17 @@ NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID", "")
 NOTION_API_URL = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
 
-# Excel列名(英語) → Notionプロパティ名(日本語) のマッピング
-# ※日本語ヘッダーのExcelにも対応（日本語→日本語のマッピングも含む）
+# Excel列名 → Notionプロパティ名のマッピング
 COLUMN_MAPPING = {
-    "company_name": "事業者名",
-    "email": "メールアドレス",
-    "pipeline": "パイプライン",
-    "category": "カテゴリ",
-    "address": "住所",
-    "data_source": "データソース",
-    # 日本語ヘッダーにも対応
-    "事業者名": "事業者名",
+    "施設名": "事業者名",
     "メールアドレス": "メールアドレス",
-    "パイプライン": "パイプライン",
-    "カテゴリ": "カテゴリ",
+    "区分": "カテゴリ",
+    "指定種別": "パイプライン",
     "住所": "住所",
-    "データソース": "データソース",
 }
+
+# データソースは固定値として設定
+DEFAULT_DATA_SOURCE = "厚労省新規指定"
 
 # Notionプロパティ名 → タイプ定義
 PROPERTY_TYPES = {
@@ -68,29 +53,26 @@ def build_notion_properties(row_data):
         value = row_data.get(excel_col)
         if value is None or (isinstance(value, str) and value.strip() == ""):
             continue
-
         value = str(value).strip()
         prop_type = PROPERTY_TYPES[notion_prop]
-
         if prop_type == "title":
-            properties[notion_prop] = {
-                "title": [{"text": {"content": value}}]
-            }
+            properties[notion_prop] = {"title": [{"text": {"content": value}}]}
         elif prop_type == "email":
             properties[notion_prop] = {"email": value}
         elif prop_type == "select":
             properties[notion_prop] = {"select": {"name": value}}
         elif prop_type == "rich_text":
-            properties[notion_prop] = {
-                "rich_text": [{"text": {"content": value}}]
-            }
+            properties[notion_prop] = {"rich_text": [{"text": {"content": value}}]}
+
+    # データソースは固定値
+    properties["データソース"] = {"select": {"name": DEFAULT_DATA_SOURCE}}
 
     return properties
 
 
 def get_business_name(row_data):
-    """行データから事業者名を取得（英語/日本語ヘッダー両対応）"""
-    name = row_data.get("company_name") or row_data.get("事業者名")
+    """行データから事業者名を取得"""
+    name = row_data.get("施設名")
     if name and isinstance(name, str):
         name = name.strip()
     return name if name else None
@@ -102,16 +84,13 @@ def query_existing_pages():
     url = f"{NOTION_API_URL}/databases/{NOTION_DATABASE_ID}/query"
     has_more = True
     start_cursor = None
-
     while has_more:
         payload = {}
         if start_cursor:
             payload["start_cursor"] = start_cursor
-
         resp = requests.post(url, headers=get_headers(), json=payload)
         resp.raise_for_status()
         data = resp.json()
-
         for page in data.get("results", []):
             title_prop = page["properties"].get("事業者名", {})
             title_list = title_prop.get("title", [])
@@ -119,20 +98,15 @@ def query_existing_pages():
                 name = title_list[0].get("plain_text", "")
                 if name:
                     existing[name] = page["id"]
-
         has_more = data.get("has_more", False)
         start_cursor = data.get("next_cursor")
-
     return existing
 
 
 def create_page(properties):
     """Notionにページを新規作成"""
     url = f"{NOTION_API_URL}/pages"
-    payload = {
-        "parent": {"database_id": NOTION_DATABASE_ID},
-        "properties": properties,
-    }
+    payload = {"parent": {"database_id": NOTION_DATABASE_ID}, "properties": properties}
     resp = requests.post(url, headers=get_headers(), json=payload)
     resp.raise_for_status()
     return resp.json()
@@ -147,21 +121,42 @@ def update_page(page_id, properties):
     return resp.json()
 
 
-def read_excel(file_path, sheet_name):
-    """Excelファイルを読み込み、COLUMN_MAPPINGに定義された列のみ返す"""
+def find_header_row(rows):
+    """ヘッダー行を自動検出（施設名・メールアドレス等が含まれる行）"""
+    search_keys = {"施設名", "メールアドレス", "住所", "区分", "指定種別"}
+    for idx, row in enumerate(rows):
+        cells = [str(c).strip() if c else "" for c in row]
+        matched = [c for c in cells if c in search_keys]
+        if len(matched) >= 3:
+            return idx
+    return None
+
+
+def read_excel(file_path, sheet_name, header_row=None):
+    """Excelファイルを読み込み、マッピング対象列のみ返す"""
     wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
     ws = wb[sheet_name]
-
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
         print("Excelファイルにデータがありません")
         wb.close()
         return []
 
-    headers = [str(h).strip() if h else "" for h in rows[0]]
-    allowed_columns = set(COLUMN_MAPPING.keys())
+    if header_row is not None:
+        h_idx = header_row - 1
+    else:
+        h_idx = find_header_row(rows)
+        if h_idx is None:
+            print("エラー: ヘッダー行が見つかりません。--header-row で指定してください")
+            print("  先頭5行の内容:")
+            for i, r in enumerate(rows[:5], 1):
+                print(f"    行{i}: {r}")
+            wb.close()
+            return []
+        print(f"  ヘッダー行を自動検出: {h_idx + 1}行目")
 
-    # ヘッダーの検証: 許可されたカラムがいくつ見つかったか表示
+    headers = [str(h).strip() if h else "" for h in rows[h_idx]]
+    allowed_columns = set(COLUMN_MAPPING.keys())
     matched = [h for h in headers if h in allowed_columns]
     ignored = [h for h in headers if h and h not in allowed_columns]
     print(f"  マッピング対象列: {matched}")
@@ -169,7 +164,7 @@ def read_excel(file_path, sheet_name):
         print(f"  無視する列: {ignored}")
 
     data = []
-    for row in rows[1:]:
+    for row in rows[h_idx + 1:]:
         row_dict = {}
         for i, header in enumerate(headers):
             if header in allowed_columns and i < len(row):
@@ -181,12 +176,11 @@ def read_excel(file_path, sheet_name):
     return data
 
 
-def sync(file_path, sheet_name, dry_run=False):
+def sync(file_path, sheet_name, dry_run=False, header_row=None):
     """メイン同期処理"""
     print(f"Excelファイル読み込み: {file_path} (シート: {sheet_name})")
-    rows = read_excel(file_path, sheet_name)
+    rows = read_excel(file_path, sheet_name, header_row=header_row)
     print(f"  → {len(rows)} 行のデータを検出")
-
     if not rows:
         return
 
@@ -209,7 +203,6 @@ def sync(file_path, sheet_name, dry_run=False):
         if not name:
             skipped += 1
             continue
-
         properties = build_notion_properties(row)
 
         if dry_run:
@@ -240,11 +233,11 @@ def sync(file_path, sheet_name, dry_run=False):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Excel → Notion 同期")
+    parser = argparse.ArgumentParser(description="Excel to Notion sync")
     parser.add_argument("--excel", required=True, help="Excelファイルのパス")
     parser.add_argument("--sheet", required=True, help="シート名")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Notion APIに送信せずに確認のみ行う")
+    parser.add_argument("--header-row", type=int, default=None, help="ヘッダー行番号 (1始まり)")
+    parser.add_argument("--dry-run", action="store_true", help="確認のみ")
     args = parser.parse_args()
 
     if not NOTION_TOKEN:
@@ -253,12 +246,11 @@ def main():
     if not NOTION_DATABASE_ID:
         print("エラー: NOTION_DATABASE_ID 環境変数を設定してください")
         sys.exit(1)
-
     if not os.path.exists(args.excel):
         print(f"エラー: ファイルが見つかりません: {args.excel}")
         sys.exit(1)
 
-    sync(args.excel, args.sheet, dry_run=args.dry_run)
+    sync(args.excel, args.sheet, dry_run=args.dry_run, header_row=args.header_row)
 
 
 if __name__ == "__main__":
