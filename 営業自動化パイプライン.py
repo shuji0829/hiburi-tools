@@ -1,19 +1,24 @@
 """
 営業自動化パイプライン
-Notionのパイプラインステージに応じて自動メール送信・ステータス更新を行う
+Notionのステータスに応じて自動メール送信・ステータス更新を行う
 
-パイプラインステージ:
-  新規 → 連絡済み → フォローアップ → 商談中 → 成約 / 休止
+ステータス:
+  リード → 見込み → アクティブ顧客 / 非アクティブ顧客
 
 処理フロー:
   1. Notionから対象レコードを取得
-  2. メールアドレスがある宛先に営業メール送信
-  3. ステータスを更新
+  2. 住所から最寄駅を取得
+  3. テンプレートに宛先情報を差し込んでメール送信
+  4. ステータスを更新
+
+テンプレート:
+  templates/ フォルダ内のテキストファイルを使用
+  使える変数: {会社名}, {最寄駅}, {住所}, {電話番号}, {診療科目}
 
 使い方:
   確認のみ:  python 営業自動化パイプライン.py --dry-run
-  新規のみ:  python 営業自動化パイプライン.py --stage 新規 --limit 50
-  本番実行:  python 営業自動化パイプライン.py --stage 新規
+  リードのみ: python 営業自動化パイプライン.py --stage リード --limit 50
+  本番実行:  python 営業自動化パイプライン.py --stage リード
 """
 
 import argparse
@@ -33,6 +38,7 @@ from config import (
     EMAIL_BATCH_SIZE, EMAIL_DELAY_SECONDS,
 )
 from notion_client import query_all_pages, update_page
+from station_lookup import get_nearest_station
 
 
 # 送信ログファイル
@@ -42,8 +48,10 @@ SEND_LOG_FILE = os.path.join(
     LOG_DIR, f"email_send_{datetime.now():%Y%m%d}.csv"
 )
 
+# テンプレートフォルダ
+TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+
 # パイプライン定義（クリニック顧客データベースの「ステータス」に対応）
-# ステータス: リード → 見込み → アクティブ顧客 / 非アクティブ顧客
 PIPELINE_STAGES = {
     "リード": {
         "action": "initial_outreach",
@@ -59,8 +67,7 @@ PIPELINE_STAGES = {
 # 旧ステージ名との互換性
 PIPELINE_STAGES["新規"] = PIPELINE_STAGES["リード"]
 
-# カテゴリ別メールテンプレート
-# {カテゴリキーワード: テンプレートセット名}
+# カテゴリ別テンプレート
 CATEGORY_TEMPLATES = {
     "歯科": "dental",
     "薬局": "pharmacy",
@@ -69,110 +76,29 @@ CATEGORY_TEMPLATES = {
     "ドラッグ": "pharmacy",
 }
 
-# デフォルト + カテゴリ別テンプレート
-EMAIL_TEMPLATES = {
-    # === 初回営業メール ===
-    "initial_outreach": {
-        "subject": "【ご挨拶】{事業者名}様へのご案内 - HIBURI株式会社",
-        "body": """{事業者名} 御中
 
-はじめまして。HIBURI株式会社の富高修司と申します。
+def load_template(template_key):
+    """テンプレートファイルを読み込む → {"subject": ..., "body": ...}"""
+    path = os.path.join(TEMPLATE_DIR, f"{template_key}.txt")
+    if not os.path.exists(path):
+        return None
 
-この度、新規ご開業おめでとうございます。
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
 
-弊社では医療機関様向けに、業務効率化・集患支援のサービスを
-ご提供しております。
+    # フォーマット: 1行目が "subject: ..." で、"---" 区切りの後が本文
+    parts = content.split("---", 1)
+    if len(parts) != 2:
+        return None
 
-ご多忙のところ恐れ入りますが、もしご興味がございましたら
-お気軽にご返信ください。
+    header = parts[0].strip()
+    body = parts[1].strip()
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-HIBURI株式会社
-富高修司（とみたか しゅうじ）
-Email: shuji.tomitaka@hiburi.co.jp
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-""",
-    },
-    "initial_outreach_dental": {
-        "subject": "【ご挨拶】{事業者名}様へのご案内 - HIBURI株式会社",
-        "body": """{事業者名} 御中
+    subject = ""
+    if header.lower().startswith("subject:"):
+        subject = header[len("subject:"):].strip()
 
-はじめまして。HIBURI株式会社の富高修司と申します。
-
-この度、新規ご開業おめでとうございます。
-
-弊社では歯科医院様向けに、Web集患・予約システム・
-業務効率化のサービスをご提供しております。
-
-開業初期は特に集患が重要かと存じます。
-もしよろしければ、事例を含めた資料をお送りいたします。
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-HIBURI株式会社
-富高修司（とみたか しゅうじ）
-Email: shuji.tomitaka@hiburi.co.jp
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-""",
-    },
-    "initial_outreach_pharmacy": {
-        "subject": "【ご挨拶】{事業者名}様へのご案内 - HIBURI株式会社",
-        "body": """{事業者名} 御中
-
-はじめまして。HIBURI株式会社の富高修司と申します。
-
-この度、新規ご開局おめでとうございます。
-
-弊社では薬局様向けに、オンライン服薬指導対応・
-業務効率化のサービスをご提供しております。
-
-ご興味がございましたら、お気軽にご返信ください。
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-HIBURI株式会社
-富高修司（とみたか しゅうじ）
-Email: shuji.tomitaka@hiburi.co.jp
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-""",
-    },
-    # === フォローアップメール ===
-    "followup": {
-        "subject": "【再度のご案内】{事業者名}様 - HIBURI株式会社",
-        "body": """{事業者名} 御中
-
-先日はご挨拶のメールをお送りさせていただきました。
-HIBURI株式会社の富高です。
-
-ご多忙のところ恐れ入りますが、改めてご案内申し上げます。
-
-弊社サービスについてご不明点がございましたら、
-お気軽にお問い合わせください。
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-HIBURI株式会社
-富高修司（とみたか しゅうじ）
-Email: shuji.tomitaka@hiburi.co.jp
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-""",
-    },
-    # === 最終フォローアップ ===
-    "final_followup": {
-        "subject": "【最終ご案内】{事業者名}様 - HIBURI株式会社",
-        "body": """{事業者名} 御中
-
-数回にわたりご連絡をさせていただきましたが、
-お忙しいところ恐縮です。
-
-本メールをもちまして一旦ご案内を控えさせていただきます。
-ご興味をお持ちの際は、いつでもお気軽にご連絡ください。
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-HIBURI株式会社
-富高修司（とみたか しゅうじ）
-Email: shuji.tomitaka@hiburi.co.jp
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-""",
-    },
-}
+    return {"subject": subject, "body": body}
 
 
 def get_template_key(action, category):
@@ -181,9 +107,21 @@ def get_template_key(action, category):
         for keyword, template_suffix in CATEGORY_TEMPLATES.items():
             if keyword in category:
                 specific_key = f"{action}_{template_suffix}"
-                if specific_key in EMAIL_TEMPLATES:
+                if load_template(specific_key):
                     return specific_key
     return action
+
+
+def render_template(template, variables):
+    """テンプレートに変数を差し込む。未定義変数は空文字に"""
+    subject = template["subject"]
+    body = template["body"]
+
+    for key, value in variables.items():
+        subject = subject.replace(f"{{{key}}}", value)
+        body = body.replace(f"{{{key}}}", value)
+
+    return subject, body
 
 
 def send_email(to_email, subject, body):
@@ -221,12 +159,14 @@ def process_stage(page, stage_config, dry_run=False):
     name = page.get("会社名", "") or page.get("事業者名", "不明")
     email = page.get("メールアドレス", "")
     category = page.get("診療科目", "") or page.get("カテゴリ", "")
+    address = page.get("所在地", "") or page.get("住所", "")
+    phone = page.get("電話番号", "")
     page_id = page["_page_id"]
     action = stage_config["action"]
     next_stage = stage_config["next_stage"]
     current_stage = [k for k, v in PIPELINE_STAGES.items() if v == stage_config][0]
 
-    # メールアドレスがない場合はスキップ（送信しない）
+    # メールアドレスがない場合はスキップ
     if not email:
         print(f"  [{name}] メールアドレスなし → スキップ")
         log_send(name, "", current_stage, action, "skipped_no_email")
@@ -234,17 +174,31 @@ def process_stage(page, stage_config, dry_run=False):
 
     # カテゴリに応じたテンプレート選択
     template_key = get_template_key(action, category)
-    template = EMAIL_TEMPLATES.get(template_key)
+    template = load_template(template_key)
     if not template:
         print(f"  [{name}] テンプレートなし: {template_key}")
         return "no_template"
 
-    subject = template["subject"].format(事業者名=name, 会社名=name)
-    body = template["body"].format(事業者名=name, 会社名=name)
+    # 最寄駅を取得
+    station = get_nearest_station(address) if address else ""
+
+    # テンプレート変数
+    variables = {
+        "会社名": name,
+        "事業者名": name,
+        "最寄駅": station or "最寄",
+        "住所": address,
+        "電話番号": phone,
+        "診療科目": category,
+    }
+
+    subject, body = render_template(template, variables)
 
     if dry_run:
         print(f"  [{name}] → {email} (テンプレート: {template_key})")
         print(f"    件名: {subject}")
+        if station:
+            print(f"    最寄駅: {station}")
         print(f"    → 次ステージ: {next_stage}")
         return "dry_run"
 
@@ -269,6 +223,7 @@ def run_pipeline(target_stage=None, dry_run=False, limit=None):
     print(f"=== 営業自動化パイプライン ===")
     print(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"送信元: {FROM_NAME} <{FROM_EMAIL}>")
+    print(f"テンプレート: {TEMPLATE_DIR}")
     print(f"モード: {'DRY-RUN（送信なし）' if dry_run else '本番'}")
     if limit:
         print(f"送信上限: {limit} 件")
@@ -336,7 +291,7 @@ def run_pipeline(target_stage=None, dry_run=False, limit=None):
 def main():
     parser = argparse.ArgumentParser(description="営業自動化パイプライン")
     parser.add_argument("--stage", default=None,
-                        help="処理対象ステージ (例: 新規, 連絡済み)")
+                        help="処理対象ステージ (例: リード, 見込み)")
     parser.add_argument("--limit", type=int, default=None,
                         help="送信件数上限 (デフォルト: config.EMAIL_BATCH_SIZE)")
     parser.add_argument("--dry-run", action="store_true",

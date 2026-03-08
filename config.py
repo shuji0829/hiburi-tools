@@ -64,7 +64,7 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "shuji.tomitaka@hiburi.co.jp")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")  # Googleアプリパスワード
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "shuji.tomitaka@hiburi.co.jp")
-FROM_NAME = os.environ.get("FROM_NAME", "HIBURI株式会社 富高修司")
+FROM_NAME = os.environ.get("FROM_NAME", "HIBURI株式会社 冨髙修慈")
 
 # メール送信制限
 EMAIL_BATCH_SIZE = 50       # 1回の実行で送信する最大件数
