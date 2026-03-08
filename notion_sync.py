@@ -15,16 +15,15 @@ NOTION_API_URL = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
 
 # Excel列名 → Notionプロパティ名のマッピング
+# サンプル形式: Excel列名がそのままNotionプロパティ名
 COLUMN_MAPPING = {
-    "施設名": "事業者名",
+    "事業者名": "事業者名",
     "メールアドレス": "メールアドレス",
-    "区分": "カテゴリ",
-    "指定種別": "パイプライン",
+    "カテゴリ": "カテゴリ",
+    "パイプライン": "パイプライン",
     "住所": "住所",
+    "データソース": "データソース",
 }
-
-# データソースは固定値として設定
-DEFAULT_DATA_SOURCE = "厚労省新規指定"
 
 # Notionプロパティ名 → タイプ定義
 PROPERTY_TYPES = {
@@ -64,15 +63,12 @@ def build_notion_properties(row_data):
         elif prop_type == "rich_text":
             properties[notion_prop] = {"rich_text": [{"text": {"content": value}}]}
 
-    # データソースは固定値
-    properties["データソース"] = {"select": {"name": DEFAULT_DATA_SOURCE}}
-
     return properties
 
 
 def get_business_name(row_data):
     """行データから事業者名を取得"""
-    name = row_data.get("施設名")
+    name = row_data.get("事業者名")
     if name and isinstance(name, str):
         name = name.strip()
     return name if name else None
@@ -123,7 +119,7 @@ def update_page(page_id, properties):
 
 def find_header_row(rows):
     """ヘッダー行を自動検出（施設名・メールアドレス等が含まれる行）"""
-    search_keys = {"施設名", "メールアドレス", "住所", "区分", "指定種別"}
+    search_keys = {"事業者名", "メールアドレス", "住所", "カテゴリ", "パイプライン", "データソース"}
     for idx, row in enumerate(rows):
         cells = [str(c).strip() if c else "" for c in row]
         matched = [c for c in cells if c in search_keys]
@@ -186,12 +182,12 @@ def sync(file_path, sheet_name, dry_run=False, header_row=None):
 
     if dry_run:
         print("\n[DRY-RUN モード] Notion APIへの送信はスキップします")
+        existing = {}
     else:
         print("\n[本番モード] Notion APIに送信します")
-
-    print("既存Notionページを取得中...")
-    existing = query_existing_pages()
-    print(f"  → 既存ページ: {len(existing)} 件")
+        print("既存Notionページを取得中...")
+        existing = query_existing_pages()
+        print(f"  → 既存ページ: {len(existing)} 件")
 
     created = 0
     updated = 0
