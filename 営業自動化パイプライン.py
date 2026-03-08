@@ -190,6 +190,7 @@ def process_stage(page, stage_config, dry_run=False):
         "住所": address,
         "電話番号": phone,
         "診療科目": category,
+        "担当者名": FROM_NAME,
     }
 
     subject, body = render_template(template, variables)
