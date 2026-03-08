@@ -210,11 +210,20 @@ def _extract_record(row, prefecture):
         else:
             category = "医療機関"
 
+    # 開設者 (列5) / 管理者 (列6)
+    founder = str(row[5]).strip() if len(row) > 5 and row[5] else ""
+    manager = str(row[6]).strip() if len(row) > 6 and row[6] else ""
+    # PDF内改行・余計な空白を除去
+    founder = founder.replace("\n", "").replace("　", " ").strip()
+    manager = manager.replace("\n", "").replace("　", " ").strip()
+
     record = {
         "事業者名": name,
         "住所": address,
         "電話番号": phone,
         "カテゴリ": category,
+        "開設者": founder,
+        "管理者": manager,
         "データソース": DEFAULT_DATA_SOURCE,
         "パイプライン": "新規",
     }
@@ -358,7 +367,7 @@ def deduplicate(records):
 def output_to_excel(records, file_path):
     """結果をExcelに出力"""
     headers = ["事業者名", "住所", "電話番号", "ホームページ", "メールアドレス",
-               "カテゴリ", "パイプライン", "データソース", "指定期間", "都道府県"]
+               "カテゴリ", "開設者", "管理者", "パイプライン", "データソース", "指定期間", "都道府県"]
     write_excel(file_path, "新規指定一覧", records, headers=headers)
 
 

@@ -33,6 +33,8 @@ COLUMN_ALIASES = {
     "データソース": "リードソース",
     "電話番号": "電話番号",
     "ホームページ": "備考",  # 備考フィールドにHP URLを記載
+    "開設者": "院長名",       # 厚生局PDFの開設者 → 院長名
+    "管理者": "担当者氏名",   # 厚生局PDFの管理者 → 担当者氏名
 }
 
 # データソースのデフォルト値（リードソースの選択肢に合わせる）
@@ -64,7 +66,7 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "shuji.tomitaka@hiburi.co.jp")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")  # Googleアプリパスワード
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "shuji.tomitaka@hiburi.co.jp")
-FROM_NAME = os.environ.get("FROM_NAME", "HIBURI株式会社 冨髙修慈")
+FROM_NAME = os.environ.get("FROM_NAME", "株式会社HIBURI 冨髙修慈")
 
 # メール送信制限
 EMAIL_BATCH_SIZE = 50       # 1回の実行で送信する最大件数

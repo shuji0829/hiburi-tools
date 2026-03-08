@@ -13,7 +13,7 @@ Notionのステータスに応じて自動メール送信・ステータス更�
 
 テンプレート:
   templates/ フォルダ内のテキストファイルを使用
-  使える変数: {会社名}, {最寄駅}, {住所}, {電話番号}, {診療科目}
+  使える変数: {会社名}, {担当者名}, {最寄駅}, {住所}, {電話番号}, {診療科目}, {差出人名}
 
 使い方:
   確認のみ:  python 営業自動化パイプライン.py --dry-run
@@ -161,6 +161,9 @@ def process_stage(page, stage_config, dry_run=False):
     category = page.get("診療科目", "") or page.get("カテゴリ", "")
     address = page.get("所在地", "") or page.get("住所", "")
     phone = page.get("電話番号", "")
+    # 担当者名: 管理者 → 院長名 → 開設者 の優先順で取得
+    manager = (page.get("担当者氏名", "") or page.get("管理者", "")
+               or page.get("院長名", "") or page.get("開設者", ""))
     page_id = page["_page_id"]
     action = stage_config["action"]
     next_stage = stage_config["next_stage"]
@@ -186,11 +189,12 @@ def process_stage(page, stage_config, dry_run=False):
     variables = {
         "会社名": name,
         "事業者名": name,
+        "担当者名": manager or "ご担当者",
         "最寄駅": station or "最寄",
         "住所": address,
         "電話番号": phone,
         "診療科目": category,
-        "担当者名": FROM_NAME,
+        "差出人名": FROM_NAME,
     }
 
     subject, body = render_template(template, variables)
