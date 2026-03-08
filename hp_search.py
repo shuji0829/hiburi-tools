@@ -1,16 +1,16 @@
 """
 医療機関ホームページ・メールアドレス検索スクリプト
 
-Google Custom Search API を使って事業者名+住所からHPを特定し、
+Playwright + Google検索で事業者名+住所からHPを特定し、
 HPからメールアドレスを抽出してExcelに反映する。
 
 使い方:
   python hp_search.py --input 厚生局_新規指定一覧_R0704-R0803.xlsx --limit 100
   python hp_search.py --input 厚生局_新規指定一覧_R0704-R0803.xlsx --resume
 
-環境変数:
-  GOOGLE_API_KEY=AIzaSy...
-  GOOGLE_CSE_ID=c5323375b80fa4449
+前提:
+  pip install playwright openpyxl
+  playwright install chromium
 """
 
 import argparse
@@ -19,14 +19,10 @@ import os
 import re
 import sys
 import time
+import random
 
 import openpyxl
-import requests
 from urllib.parse import urlparse
-
-# Google Custom Search API 設定
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
-GOOGLE_CSE_ID = os.environ.get("GOOGLE_CSE_ID", "")
 
 # 除外ドメイン（ポータルサイト等、公式HPではないもの）
 EXCLUDE_DOMAINS = {
@@ -40,6 +36,14 @@ EXCLUDE_DOMAINS = {
     "medinew.jp", "medimap.jp", "hospiten.jp",
     "kamponavi.com", "clinicnavi.jp", "mynavi.jp",
     "iryou.teikyouseido.mhlw.go.jp", "kurashi.yahoo.co.jp",
+    "kusurinomadoguchi.com", "sokuyaku.jp", "clinics-app.com",
+    "e-classa.net", "localplace.jp", "health.ne.jp",
+    "job-medley.com", "m3.com", "pcareer.m3.com",
+    "medicalnote.jp", "homemate-research-drugstore.com",
+    "kaigokensaku.mhlw.go.jp", "jmap.jp", "opendata-japan.com",
+    "shufoo.net", "tokubai.co.jp", "dpoint.docomo.ne.jp",
+    "mapfan.com", "guppy.jp", "indeed.com", "stanby.co.jp",
+    "haisha-yoyaku.jp", "dental-city.com",
 }
 
 # メールアドレスの正規表現
@@ -56,116 +60,117 @@ EXCLUDE_EMAIL_PATTERNS = [
     r'.*\.jpg$',
     r'.*\.gif$',
     r'.*\.svg$',
-    r'wixpress\.com',
-    r'sentry\.io',
+    r'.*wixpress\.com',
+    r'.*sentry\.io',
+    r'.*@sentry-next\.wixpress\.com',
 ]
 
 # 進捗ファイル
 PROGRESS_FILE = "hp_search_progress.json"
 
 
-def search_google(query, api_key, cse_id, num=5):
-    """Google Custom Search API で検索"""
-    resp = requests.get(
-        "https://www.googleapis.com/customsearch/v1",
-        params={
-            "key": api_key,
-            "cx": cse_id,
-            "q": query,
-            "num": num,
-            "lr": "lang_ja",
-            "gl": "jp",
-        },
-        timeout=10,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return data.get("items", [])
-
-
-def is_official_domain(url, name):
+def is_official_domain(url):
     """ポータルサイトを除外して公式HPらしいか判定"""
-    parsed = urlparse(url)
-    domain = parsed.netloc.lower()
-    # www.を除去
-    if domain.startswith("www."):
-        domain = domain[4:]
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        for excl in EXCLUDE_DOMAINS:
+            if domain == excl or domain.endswith("." + excl):
+                return False
+        return True
+    except Exception:
+        return False
 
-    # 除外ドメインチェック
-    for excl in EXCLUDE_DOMAINS:
-        if domain == excl or domain.endswith("." + excl):
+
+def filter_email(email):
+    """メールアドレスのフィルタリング"""
+    for pattern in EXCLUDE_EMAIL_PATTERNS:
+        if re.match(pattern, email, re.IGNORECASE):
             return False
-
     return True
 
 
-def extract_emails_from_page(url):
-    """URLからメールアドレスを抽出"""
-    try:
-        resp = requests.get(url, timeout=10, headers={
-            "User-Agent": "Mozilla/5.0 (compatible; HiburiBot/1.0)"
-        })
-        if resp.status_code != 200:
-            return []
-        text = resp.text
+def search_google_playwright(page, query, num_results=5):
+    """Playwright を使ってGoogle検索し、結果URLを返す"""
+    encoded_query = query.replace(" ", "+")
+    url = f"https://www.google.co.jp/search?q={encoded_query}&hl=ja&gl=jp&num={num_results}"
 
-        emails = EMAIL_PATTERN.findall(text)
-        # フィルタリング
-        filtered = []
-        for email in emails:
-            skip = False
-            for pattern in EXCLUDE_EMAIL_PATTERNS:
-                if re.match(pattern, email, re.IGNORECASE):
-                    skip = True
+    try:
+        page.goto(url, timeout=15000, wait_until="domcontentloaded")
+        # 少し待つ（レート制限対策）
+        time.sleep(random.uniform(1.0, 2.0))
+
+        # 検索結果のリンクを取得
+        results = []
+        # Google検索結果の主要セレクタ
+        links = page.query_selector_all("div#search a[href]")
+        for link in links:
+            href = link.get_attribute("href")
+            if href and href.startswith("http") and is_official_domain(href):
+                # URLの正規化（トラッキングパラメータ除去）
+                parsed = urlparse(href)
+                clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+                if clean_url not in results:
+                    results.append(clean_url)
+                if len(results) >= num_results:
                     break
-            if not skip and email not in filtered:
-                filtered.append(email)
-        return filtered
+        return results
+    except Exception as e:
+        print(f"    検索エラー: {e}")
+        return []
+
+
+def extract_emails_from_page(page, url):
+    """Playwrightを使ってページからメールアドレスを抽出"""
+    try:
+        page.goto(url, timeout=10000, wait_until="domcontentloaded")
+        time.sleep(0.5)
+        content = page.content()
+        emails = EMAIL_PATTERN.findall(content)
+        return [e for e in dict.fromkeys(emails) if filter_email(e)]
     except Exception:
         return []
 
 
-def find_hp_and_email(name, address, api_key, cse_id):
+def find_hp_and_email(page, name, address):
     """事業者名+住所から公式HPとメールアドレスを検索"""
-    # 住所から都道府県+市区町村を抽出（短縮）
+    # 住所から都道府県+市区町村を抽出
     addr_short = ""
     addr_match = re.search(r'[^\d〒\s]{2,3}[都道府県].{2,6}[市区町村郡]', address or "")
     if addr_match:
         addr_short = addr_match.group()
 
-    query = f"{name} {addr_short} 公式"
-    results = search_google(query, api_key, cse_id, num=5)
+    query = f"{name} {addr_short}"
+    results = search_google_playwright(page, query, num_results=5)
 
     hp_url = None
     email = None
 
-    # 検索結果から公式HPを特定
-    for item in results:
-        url = item.get("link", "")
-        if is_official_domain(url, name):
-            hp_url = url
-            break
+    if results:
+        hp_url = results[0]  # 最初の公式サイト結果
 
-    # HPが見つかった場合、メールアドレスを抽出
-    if hp_url:
-        # ドメインのトップページも確認
+        # HPからメール抽出
         parsed = urlparse(hp_url)
         top_url = f"{parsed.scheme}://{parsed.netloc}/"
-        urls_to_check = [hp_url]
-        if hp_url != top_url:
-            urls_to_check.append(top_url)
 
-        for check_url in urls_to_check:
-            emails = extract_emails_from_page(check_url)
+        # まず検索結果のページ
+        emails = extract_emails_from_page(page, hp_url)
+        if emails:
+            email = emails[0]
+
+        # トップページ
+        if not email and hp_url != top_url:
+            emails = extract_emails_from_page(page, top_url)
             if emails:
-                email = emails[0]  # 最初のメールアドレスを使用
-                break
+                email = emails[0]
 
-        # メール見つからない場合、/contact や /about ページも試行
+        # お問い合わせページ
         if not email:
             for suffix in ["/contact", "/contact/", "/about", "/access"]:
                 contact_url = top_url.rstrip("/") + suffix
-                emails = extract_emails_from_page(contact_url)
+                emails = extract_emails_from_page(page, contact_url)
                 if emails:
                     email = emails[0]
                     break
@@ -188,32 +193,34 @@ def save_progress(progress):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="医療機関HP・メール検索")
+    parser = argparse.ArgumentParser(description="医療機関HP・メール検索 (Playwright+Google)")
     parser.add_argument("--input", required=True, help="入力Excelファイル")
     parser.add_argument("--sheet", default="新規指定一覧", help="シート名")
     parser.add_argument("--limit", type=int, default=0, help="処理件数上限 (0=全件)")
     parser.add_argument("--resume", action="store_true", help="前回の続きから再開")
-    parser.add_argument("--delay", type=float, default=1.0, help="API呼び出し間隔(秒)")
-    parser.add_argument("--api-key", default=None, help="Google API Key")
-    parser.add_argument("--cse-id", default=None, help="Google CSE ID")
+    parser.add_argument("--headless", action="store_true", default=True,
+                        help="ヘッドレスモード (デフォルト: True)")
+    parser.add_argument("--no-headless", action="store_false", dest="headless",
+                        help="ブラウザ表示モード")
+    parser.add_argument("--delay", type=float, default=2.0,
+                        help="検索間隔(秒) ※短すぎるとブロックされます")
     args = parser.parse_args()
 
-    api_key = args.api_key or GOOGLE_API_KEY
-    cse_id = args.cse_id or GOOGLE_CSE_ID
-
-    if not api_key or not cse_id:
-        print("エラー: GOOGLE_API_KEY と GOOGLE_CSE_ID を環境変数またはオプションで指定してください")
-        print("  export GOOGLE_API_KEY=AIzaSy...")
-        print("  export GOOGLE_CSE_ID=c5323375b80fa4449")
+    # Playwright インポート
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("エラー: Playwright がインストールされていません")
+        print("  pip install playwright")
+        print("  playwright install chromium")
         sys.exit(1)
 
     # Excel読み込み
     wb = openpyxl.load_workbook(args.input)
     ws = wb[args.sheet]
     rows = list(ws.iter_rows(values_only=True))
-    headers = list(rows[0])
+    headers = [str(h) for h in rows[0]]
 
-    # 列インデックス特定
     name_idx = headers.index("事業者名")
     addr_idx = headers.index("住所")
     hp_idx = headers.index("ホームページ")
@@ -228,85 +235,101 @@ def main():
     searched = 0
     found_hp = 0
     found_email = 0
-    api_calls = 0
 
+    print(f"=== HP・メール検索 (Playwright + Google) ===")
     print(f"対象: {total} 件 (上限: {limit} 件)")
     print(f"既処理: {len(progress)} 件")
+    print(f"ヘッドレス: {args.headless}")
     print()
 
     # 書き込み用にExcelを再オープン
     wb = openpyxl.load_workbook(args.input)
     ws = wb[args.sheet]
 
-    try:
-        for row_num, row in enumerate(rows[1:], start=2):
-            if searched >= limit:
-                break
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=args.headless)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            locale="ja-JP",
+        )
+        page = context.new_page()
 
-            name = str(row[name_idx] or "").strip()
-            address = str(row[addr_idx] or "").strip()
+        try:
+            for row_num, row in enumerate(rows[1:], start=2):
+                if searched >= limit:
+                    break
 
-            if not name:
-                continue
+                name = str(row[name_idx] or "").strip()
+                address = str(row[addr_idx] or "").strip()
 
-            # 既にHPが入力済みならスキップ
-            existing_hp = row[hp_idx]
-            if existing_hp:
-                continue
+                if not name:
+                    continue
 
-            # 進捗チェック
-            if name in progress:
-                # 進捗にあるが未書き込みの場合は書き込み
-                hp = progress[name].get("hp")
-                em = progress[name].get("email")
+                # 既にHPが入力済みならスキップ
+                existing_hp = row[hp_idx]
+                if existing_hp:
+                    continue
+
+                # 進捗チェック（前回の結果を書き込み）
+                if name in progress:
+                    hp = progress[name].get("hp")
+                    em = progress[name].get("email")
+                    if hp:
+                        ws.cell(row=row_num, column=hp_idx + 1, value=hp)
+                    if em:
+                        ws.cell(row=row_num, column=email_idx + 1, value=em)
+                    continue
+
+                # Google検索
+                print(f"  [{searched + 1}/{limit}] {name}...", end=" ", flush=True)
+                try:
+                    hp, em = find_hp_and_email(page, name, address)
+                except Exception as e:
+                    print(f"エラー: {e}")
+                    progress[name] = {"hp": None, "email": None}
+                    searched += 1
+                    continue
+
+                # 結果保存
+                progress[name] = {"hp": hp, "email": em}
+
                 if hp:
                     ws.cell(row=row_num, column=hp_idx + 1, value=hp)
+                    found_hp += 1
                 if em:
                     ws.cell(row=row_num, column=email_idx + 1, value=em)
-                continue
+                    found_email += 1
 
-            # Google検索
-            try:
-                hp, em = find_hp_and_email(name, address, api_key, cse_id)
-                api_calls += 1
-            except requests.exceptions.HTTPError as e:
-                if "429" in str(e) or "403" in str(e):
-                    print(f"\nAPI制限到達 ({e}). 中間保存して終了します。")
-                    break
-                raise
+                status = f"HP: {hp or 'なし'}"
+                if em:
+                    status += f" | Email: {em}"
+                print(status)
 
-            # 結果保存
-            progress[name] = {"hp": hp, "email": em}
+                searched += 1
 
-            if hp:
-                ws.cell(row=row_num, column=hp_idx + 1, value=hp)
-                found_hp += 1
-            if em:
-                ws.cell(row=row_num, column=email_idx + 1, value=em)
-                found_email += 1
+                # 10件ごとに中間保存
+                if searched % 10 == 0:
+                    print(f"\n  --- {searched}/{limit} 件処理 (HP: {found_hp}, Email: {found_email}) ---\n")
+                    save_progress(progress)
+                    wb.save(args.input)
 
-            searched += 1
-            if searched % 10 == 0:
-                print(f"  {searched}/{limit} 件処理 (HP: {found_hp}, Email: {found_email}, API: {api_calls}回)")
-                # 中間保存
-                save_progress(progress)
-                wb.save(args.input)
+                # レート制限対策
+                time.sleep(args.delay + random.uniform(0, 1.0))
 
-            time.sleep(args.delay)
-
-    except KeyboardInterrupt:
-        print("\n中断されました。保存中...")
+        except KeyboardInterrupt:
+            print("\n中断されました。保存中...")
+        finally:
+            browser.close()
 
     # 最終保存
     save_progress(progress)
     wb.save(args.input)
     wb.close()
 
-    print(f"\n完了:")
+    print(f"\n=== 完了 ===")
     print(f"  処理件数: {searched}")
     print(f"  HP発見: {found_hp}")
     print(f"  メール発見: {found_email}")
-    print(f"  API呼び出し: {api_calls} 回")
     print(f"  進捗保存: {PROGRESS_FILE}")
 
 
