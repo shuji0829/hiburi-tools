@@ -61,9 +61,9 @@ EMAIL_DELAY_SECONDS = 5     # メール間の待機時間（秒）
 # スケジューラ設定
 SCHEDULE_SCRAPER_DAY = "monday"  # 毎週月曜
 SCHEDULE_SCRAPER_TIME = "09:00"
-SCHEDULE_SYNC_TIME = "10:00"    # 毎日10時
+SCHEDULE_SYNC_TIME = "00:00"    # 毎日0時（Notion同期）
 SCHEDULE_HP_SEARCH_TIME = "20:00"  # 毎日20時（HP検索）
-SCHEDULE_PIPELINE_TIME = "11:00"  # 毎日11時
+SCHEDULE_PIPELINE_TIME = "09:00"  # 毎日9時（メール送信）
 
 # HP検索設定
 HP_SEARCH_DAILY_LIMIT = 200  # 1日あたりの検索件数上限

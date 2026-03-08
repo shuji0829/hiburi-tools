@@ -159,12 +159,17 @@ def start_scheduler():
     for key, task in TASKS.items():
         logger.info(f"  {task['name']}: {task['schedule']}")
 
-    # HP検索（早朝）
+    # HP検索（夜間20:00）
     schedule.every().day.at(SCHEDULE_HP_SEARCH_TIME).do(
         lambda: run_task("hp_search"))
 
-    # 日次タスク（同期→メール送信→逆同期）
-    schedule.every().day.at(SCHEDULE_SYNC_TIME).do(run_daily)
+    # Notion同期（深夜0:00）
+    schedule.every().day.at(SCHEDULE_SYNC_TIME).do(
+        lambda: [run_task("sync"), run_task("reverse_sync")])
+
+    # メール送信（朝9:00）
+    schedule.every().day.at(SCHEDULE_PIPELINE_TIME).do(
+        lambda: run_task("pipeline"))
 
     # 月次タスク（毎月1日）
     def monthly_check():
