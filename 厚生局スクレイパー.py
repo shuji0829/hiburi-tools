@@ -5,12 +5,18 @@
 
 対象: https://kouseikyoku.mhlw.go.jp/kantoshinetsu/chousa/shitei.html
 
-取得項目:
-  - 医療機関名称（事業者名）
-  - 住所
-  - 電話番号
-  - ホームページ（ドメイン推定）
-  - メールアドレス（ドメインから推定）
+PDF列構造 (実測):
+  [0] 項番
+  [1] 医療機関番号
+  [2] 医療機関名称          ← 取得対象
+  [3] 医療機関所在地        ← 取得対象 (〒付き、改行区切り)
+  [4] 電話番号/勤務医数/診療科名 ← 電話番号を抽出 (1行目が電話番号)
+  [5] 開設者氏名
+  [6] 管理者氏名
+  [7] 点数表
+  [8] 指定年月日/指定期間終
+  [9] 病床数/登録理由
+  [10] 備考
 """
 
 import argparse
@@ -44,6 +50,9 @@ PREFECTURE_CODES = {
 SHINKI_PDF_PATTERN = re.compile(
     r'(\d{2,3})shinki_[a-z]+_r(\d{4})\.pdf', re.IGNORECASE
 )
+
+# 電話番号パターン
+PHONE_PATTERN = re.compile(r'[\d０-９][\d０-９\-－()（）]{8,}')
 
 
 def fetch_pdf_links(page_url):
@@ -113,7 +122,7 @@ def extract_from_pdf(pdf_path, prefecture):
     records = []
     try:
         with pdfplumber.open(pdf_path) as pdf:
-            for page_num, page in enumerate(pdf.pages):
+            for page in pdf.pages:
                 tables = page.extract_tables()
                 for table in tables:
                     if not table:
@@ -127,113 +136,166 @@ def extract_from_pdf(pdf_path, prefecture):
 
 
 def _parse_table_rows(table, prefecture):
-    """テーブル行から医療機関情報を抽出"""
+    """厚生局PDF固有のテーブル構造からデータ抽出
+
+    列構造:
+      [0] 項番  [1] 医療機関番号  [2] 名称  [3] 住所
+      [4] 電話/勤務医/診療科  [5] 開設者  [6] 管理者
+      [7] 点数表  [8] 指定日  [9] 病床数  [10] 備考
+    """
     records = []
     if not table or len(table) < 2:
         return records
 
-    # ヘッダー行を探す
-    header_idx = _find_header_in_table(table)
-    if header_idx is None:
-        return records
-
-    headers = [str(c).strip().replace("\n", "") if c else "" for c in table[header_idx]]
-    col_map = _map_columns(headers)
-
-    if "name" not in col_map:
-        return records
-
-    for row in table[header_idx + 1:]:
-        if not row or all(c is None or str(c).strip() == "" for c in row):
-            continue
-
-        name = _get_cell(row, col_map.get("name"))
-        if not name or len(name) < 2:
-            continue
-
-        # 明らかにヘッダー行やフッター行をスキップ
-        if any(kw in name for kw in ["名称", "合計", "件数", "※"]):
-            continue
-
-        address = _get_cell(row, col_map.get("address")) or ""
-        phone = _get_cell(row, col_map.get("phone")) or ""
-        category = _get_cell(row, col_map.get("category")) or ""
-
-        # 改行やスペースをクリーン
-        name = re.sub(r'\s+', ' ', name).strip()
-        address = re.sub(r'\s+', ' ', address).strip()
-        phone = re.sub(r'[^\d\-()]', '', phone).strip()
-
-        record = {
-            "事業者名": name,
-            "住所": f"{prefecture}{address}" if address and prefecture not in address else address,
-            "電話番号": phone,
-            "カテゴリ": category if category else "医療機関",
-            "データソース": DEFAULT_DATA_SOURCE,
-            "パイプライン": "新規",
-        }
-
-        # ドメイン・メールアドレス推定
-        homepage, email = _guess_web_presence(name, address)
-        if homepage:
-            record["ホームページ"] = homepage
-        if email:
-            record["メールアドレス"] = email
-
-        records.append(record)
-
-    return records
-
-
-def _find_header_in_table(table):
-    """テーブル内でヘッダー行を探す"""
-    header_keywords = ["名称", "所在地", "住所", "電話", "開設者"]
+    # ヘッダー行を特定
+    header_idx = None
     for idx, row in enumerate(table):
         if not row:
             continue
         text = " ".join(str(c) for c in row if c)
-        matches = sum(1 for kw in header_keywords if kw in text)
-        if matches >= 2:
-            return idx
-    return None
+        # 「名称」と「所在地」の両方を含む行がヘッダー
+        if "名称" in text and ("所在地" in text or "住所" in text):
+            header_idx = idx
+            break
 
+    # ヘッダーが見つからない場合、最初のページ以降では
+    # ヘッダーなしでデータが続くことがある（項番で判定）
+    start_idx = header_idx + 1 if header_idx is not None else 0
 
-def _map_columns(headers):
-    """ヘッダーからカラムインデックスマッピングを作成"""
-    col_map = {}
-    for idx, h in enumerate(headers):
-        if not h:
+    for row in table[start_idx:]:
+        if not row or len(row) < 5:
             continue
-        if any(kw in h for kw in ["名称", "医療機関名"]):
-            col_map["name"] = idx
-        elif any(kw in h for kw in ["所在地", "住所"]):
-            col_map["address"] = idx
-        elif "電話" in h:
-            col_map["phone"] = idx
-        elif any(kw in h for kw in ["種別", "区分", "診療科"]):
-            col_map["category"] = idx
-    return col_map
+
+        # 項番列が数字の行のみデータ行とみなす
+        item_num = str(row[0]).strip() if row[0] else ""
+        if not item_num or not item_num.replace(",", "").replace(".", "").isdigit():
+            # 項番なしでも名称があればデータ行の可能性
+            name_cell = str(row[2]).strip() if len(row) > 2 and row[2] else ""
+            if not name_cell or len(name_cell) < 2:
+                continue
+            # ヘッダー文字列は除外
+            if any(kw in name_cell for kw in ["名称", "合計", "件数", "※", "番号"]):
+                continue
+
+        record = _extract_record(row, prefecture)
+        if record:
+            records.append(record)
+
+    return records
 
 
-def _get_cell(row, idx):
-    """行からセル値を安全に取得"""
-    if idx is None or idx >= len(row):
+def _extract_record(row, prefecture):
+    """1行からレコードを抽出"""
+    # 名称 (列2)
+    name_raw = str(row[2]).strip() if len(row) > 2 and row[2] else ""
+    if not name_raw or len(name_raw) < 2:
         return None
-    val = row[idx]
-    if val is None:
+    # PDF内の改行・スペースを除去して結合
+    name = name_raw.replace("\n", "").replace(" ", "").replace("　", "").strip()
+    # ヘッダー行・フッター行を除外
+    if any(kw in name for kw in ["名称", "合計", "件数", "※", "番号", "機関名"]):
         return None
-    return str(val).strip()
+
+    # 住所 (列3) - 〒と改行を整理
+    address_raw = str(row[3]).strip() if len(row) > 3 and row[3] else ""
+    address = _clean_address(address_raw, prefecture)
+
+    # 電話番号 (列4) - 最初の行が電話番号、残りは勤務医数・診療科
+    phone_raw = str(row[4]).strip() if len(row) > 4 and row[4] else ""
+    phone, category = _extract_phone_and_category(phone_raw)
+
+    # 点数表 (列7) - 医/歯/薬 で大分類を判定
+    score_type = str(row[7]).strip() if len(row) > 7 and row[7] else ""
+    if not category:
+        if "歯" in score_type:
+            category = "歯科"
+        elif "薬" in score_type:
+            category = "薬局"
+        else:
+            category = "医療機関"
+
+    record = {
+        "事業者名": name,
+        "住所": address,
+        "電話番号": phone,
+        "カテゴリ": category,
+        "データソース": DEFAULT_DATA_SOURCE,
+        "パイプライン": "新規",
+    }
+
+    return record
 
 
-def _guess_web_presence(name, address):
-    """医療機関名からホームページ・メールアドレスを推定
+def _clean_address(raw, prefecture):
+    """住所文字列をクリーニング"""
+    if not raw:
+        return ""
+    # 改行で分割
+    lines = raw.split("\n")
+    parts = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        # 〒の全角ハイフンを半角に
+        line = line.replace("－", "-")
+        parts.append(line)
 
-    注: あくまで推定。実際のURL確認は別途必要。
-    今後、Google検索API等で実際のURLを取得する拡張が可能。
-    """
-    # 現時点では推定せず空を返す
-    # 将来的にはGoogle Custom Search APIやwhois等で取得可能
-    return None, None
+    address = " ".join(parts)
+
+    # 〒を抽出して先頭に置く
+    zip_match = re.search(r'〒\s*(\d{3}-?\d{4})', address)
+    zip_code = ""
+    if zip_match:
+        zip_code = f"〒{zip_match.group(1)} "
+        address = address[:zip_match.start()] + address[zip_match.end():]
+        address = address.strip()
+
+    # 都道府県が含まれていない場合は追加
+    has_pref = any(p in address for p in ["都", "道", "府", "県"])
+    if not has_pref and prefecture:
+        address = prefecture + address
+
+    return f"{zip_code}{address}".strip()
+
+
+def _extract_phone_and_category(raw):
+    """電話番号/勤務医数/診療科名の複合列から電話番号と診療科を抽出"""
+    if not raw:
+        return "", ""
+
+    lines = raw.split("\n")
+    phone = ""
+    category_parts = []
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # 電話番号を抽出（最初にマッチしたもの）
+        if not phone:
+            # 全角数字を半角に変換してからマッチ
+            normalized = line.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
+            match = PHONE_PATTERN.search(normalized)
+            if match:
+                phone = match.group(0)
+                phone = phone.replace("－", "-").replace("（", "(").replace("）", ")")
+                continue
+
+        # 「常 勤」「非常勤」「医 N」等の勤務医情報はスキップ
+        if any(kw in line for kw in ["常 勤", "非常勤", "常勤", "医 ", "歯 ("]):
+            continue
+
+        # 残りは診療科名の候補
+        # 1-2文字の省略形（内、外、皮、整外 等）が並ぶ
+        if len(line) >= 1 and not line[0].isdigit():
+            category_parts.append(line)
+
+    # 診療科名を結合
+    category = " ".join(category_parts).strip() if category_parts else ""
+
+    return phone, category
 
 
 def scrape_all(page_url, output_dir=None, target_period=None, target_prefecture=None):
