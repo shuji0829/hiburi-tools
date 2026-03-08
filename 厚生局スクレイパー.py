@@ -23,10 +23,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
-try:
-    import pdfplumber
-except ImportError:
-    pdfplumber = None
+pdfplumber = None  # 遅延インポート（extract_from_pdf内で読み込み）
 
 from config import (
     KOUSEIKYOKU_BASE_URL, NOTION_TOKEN, NOTION_DATABASE_ID,
@@ -104,9 +101,14 @@ def download_pdf(url, dest_dir):
 
 def extract_from_pdf(pdf_path, prefecture):
     """PDFからテーブルデータを抽出"""
+    global pdfplumber
     if pdfplumber is None:
-        print("  警告: pdfplumber がインストールされていません。pip install pdfplumber")
-        return []
+        try:
+            import pdfplumber as _pdfplumber
+            pdfplumber = _pdfplumber
+        except Exception:
+            print("  警告: pdfplumber がインストールされていません。pip install pdfplumber")
+            return []
 
     records = []
     try:
