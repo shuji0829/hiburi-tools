@@ -46,9 +46,9 @@ PREFECTURE_CODES = {
     "14": "神奈川県", "15": "新潟県", "19": "山梨県", "20": "長野県",
 }
 
-# 新規指定PDFのURLパターン
+# 新規指定PDFのURLパターン（-1, -2 等のサフィックス対応）
 SHINKI_PDF_PATTERN = re.compile(
-    r'(\d{2,3})shinki_[a-z]+_r(\d{4})\.pdf', re.IGNORECASE
+    r'(\d{2,3})shinki_([a-z]+)_r(\d{4})(?:-\d+)?\.pdf', re.IGNORECASE
 )
 
 # 電話番号パターン
@@ -66,6 +66,9 @@ def fetch_pdf_links(page_url):
     for a_tag in soup.find_all("a", href=True):
         href = a_tag["href"]
         if "shinki" in href.lower() and href.endswith(".pdf"):
+            # 保険医登録PDF(toroku)は除外
+            if "toroku" in href.lower():
+                continue
             full_url = urljoin(page_url, href)
             match = SHINKI_PDF_PATTERN.search(href)
             if match:
@@ -73,7 +76,8 @@ def fetch_pdf_links(page_url):
                 # 3桁の場合は先頭2桁が都道府県コード
                 if len(pref_code) == 3:
                     pref_code = pref_code[:2]
-                period = match.group(2)  # e.g. "0803" = 令和8年3月
+                pref_label = match.group(2)  # e.g. "tokyo"
+                period = match.group(3)  # e.g. "0803" = 令和8年3月
                 pref_name = PREFECTURE_CODES.get(pref_code, f"不明({pref_code})")
                 pdf_links.append({
                     "url": full_url,
@@ -81,14 +85,6 @@ def fetch_pdf_links(page_url):
                     "pref_code": pref_code,
                     "period": f"令和{period[:2]}年{period[2:]}月",
                     "period_raw": period,
-                })
-            else:
-                pdf_links.append({
-                    "url": full_url,
-                    "prefecture": "不明",
-                    "pref_code": "",
-                    "period": "",
-                    "period_raw": "",
                 })
 
     print(f"  → 新規指定PDF: {len(pdf_links)} 件検出")
@@ -326,21 +322,43 @@ def scrape_all(page_url, output_dir=None, target_period=None, target_prefecture=
             pdf_path = download_pdf(info["url"], output_dir)
             records = extract_from_pdf(pdf_path, info["prefecture"])
             for r in records:
-                r["_period"] = info["period"]
-                r["_prefecture"] = info["prefecture"]
+                r["指定期間"] = info["period"]
+                r["都道府県"] = info["prefecture"]
             print(f"  → {len(records)} 件抽出")
             all_records.extend(records)
         except Exception as e:
             print(f"  エラー: {e}")
 
-    print(f"\n合計: {len(all_records)} 件の医療機関を抽出")
+    print(f"\n合計: {len(all_records)} 件の医療機関を抽出（重複除去前）")
     return all_records
+
+
+def deduplicate(records):
+    """重複レコードを除去（事業者名+住所で判定、最新の期間を保持）"""
+    seen = {}  # key: (事業者名, 住所の先頭20文字) → record
+    for r in records:
+        name = r.get("事業者名", "")
+        addr = r.get("住所", "")[:20]  # 住所先頭で照合（PDF改行による微差を吸収）
+        key = (name, addr)
+        if key not in seen:
+            seen[key] = r
+        else:
+            # 同じ施設が複数月にある場合、最新の期間を保持
+            existing_period = seen[key].get("指定期間", "")
+            new_period = r.get("指定期間", "")
+            if new_period > existing_period:
+                seen[key] = r
+    unique = list(seen.values())
+    removed = len(records) - len(unique)
+    if removed > 0:
+        print(f"  重複除去: {removed} 件削除 → {len(unique)} 件")
+    return unique
 
 
 def output_to_excel(records, file_path):
     """結果をExcelに出力"""
     headers = ["事業者名", "住所", "電話番号", "ホームページ", "メールアドレス",
-               "カテゴリ", "パイプライン", "データソース"]
+               "カテゴリ", "パイプライン", "データソース", "指定期間", "都道府県"]
     write_excel(file_path, "新規指定一覧", records, headers=headers)
 
 
@@ -412,6 +430,9 @@ def main():
         print("抽出データなし")
         return
 
+    # 重複除去
+    records = deduplicate(records)
+
     # デフォルト出力: Excel
     if args.to_excel:
         output_to_excel(records, args.to_excel)
@@ -423,8 +444,8 @@ def main():
         output_to_excel(records, default_path)
 
     # 抽出サマリー
-    prefectures = set(r.get("_prefecture", "") for r in records)
-    periods = set(r.get("_period", "") for r in records)
+    prefectures = set(r.get("都道府県", "") for r in records)
+    periods = set(r.get("指定期間", "") for r in records)
     print(f"\nサマリー:")
     print(f"  都道府県: {', '.join(sorted(prefectures))}")
     print(f"  期間: {', '.join(sorted(periods))}")
