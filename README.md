@@ -4,7 +4,8 @@
 
 ## 組織構造
 
-1人社長 → 社長補佐（Claude Code） → 7部門長（Claude Code Agent）の指示委譲型組織です。
+1人社長（意思決定権者） → 秘書（Claude Code） → 7部門長（Claude Code Agent）の指示委譲型組織です。
+各部門のアウトプットは秘書が取りまとめてSlackで社長に報告し、社長のフィードバックを各部門に伝達します。
 
 詳細は [組織図ドキュメント](docs/organization-chart.md) を参照してください。
 
