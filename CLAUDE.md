@@ -243,6 +243,23 @@ curl -s -X POST 'https://slack.com/api/chat.postMessage' \
 
 **注意**: `.env` はgitignore済み。トークンはコミットしないこと。
 
+### Web版Claude CodeでのPR作成・マージ手順（スキル）
+
+Web版では `gh` コマンドが使えないため、ブラウザ操作でPR作成・マージを行う:
+
+1. **ブランチをプッシュ**: `git push -u origin claude/[ブランチ名]`
+2. **PRページを開く**: `https://github.com/shuji0829/hiburi-tools/compare/メイン...claude/[ブランチ名]`
+   - ※ ベースブランチは `メイン`（`master` ではない）
+   - `master` を選ぶと「There isn't anything to compare」エラーになる
+3. **タイトル・説明を入力** → 「Create pull request」をクリック
+4. **マージ**: ページ下部の「Merge pull request」→「Confirm merge」
+5. **ブランチ削除**: マージ後に「Delete branch」をクリック
+
+**注意事項**:
+- デフォルトブランチは `メイン`（日本語）。URL内では自動エンコードされる
+- 1人社長体制のためレビュー承認は不要、そのままマージ可能
+- Web版からは `gh` コマンド・GitHub API認証ともに使えない
+
 ### 社長の方針メモ
 - 社長は1人社長で、意思決定権を持つ
 - 秘書（Claude Code）が各部門長（Agent）に最適な指示を委譲する構図
