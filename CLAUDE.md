@@ -243,6 +243,37 @@ curl -s -X POST 'https://slack.com/api/chat.postMessage' \
 
 **注意**: `.env` はgitignore済み。トークンはコミットしないこと。
 
+### Web版Claude Codeでの.env初回セットアップ（スキル）
+
+Web版（GitHub連携）環境では `.env` ファイルがデプロイされないため、セッション開始時に毎回作成が必要:
+
+1. `.env` ファイルが存在するか確認: `ls .env`
+2. 存在しない場合、社長にトークンを確認する
+3. 社長からトークンを受領したら `.env` を作成:
+   ```bash
+   echo 'SLACK_BOT_TOKEN=xoxb-xxxxx' > .env
+   ```
+4. `.env` は `.gitignore` 済みのため、コミットされない（安全）
+5. 以降は `bash scripts/slack-post.sh general "メッセージ"` でSlack投稿可能
+
+**重要**: `.env` がない状態で `slack-post.sh` を実行すると `SLACK_BOT_TOKEN is not set` エラーになる。まず `.env` の存在確認を行うこと。
+
+### 競合調査の実行方法（スキル）
+
+経営企画部への競合調査委譲は、以下の手順で効率的に実行する:
+
+1. **3領域を並列でAgent起動**: WEB広告・DOOH/OOH・エンタメの各領域を別々のAgentに委譲し、並列実行で時間短縮
+2. **各Agentの指示**: WebSearchツールで競合企業を検索→各社のサービス内容・強み・ターゲットを整理
+3. **統合レポート作成**: 全Agentの結果を秘書が統合し、SWOT分析・ポジショニングマップ・戦略提言を追加
+4. **保存先**: `knowledge-base/decisions/YYYY-MM-DD_competitive-analysis.md`
+5. **Slack報告**: 報告フォーマットに従い #general に投稿
+
+**学び**:
+- WebSearchは日本語クエリで十分な結果が得られる
+- 1領域あたり5-7社が適切な分析対象数
+- 「HIBURIとの差別化ポイント」を各社ごとに明記すると社長の判断に役立つ
+- 統合ポジショニングマップ（全領域横断比較表）が最も価値が高い
+
 ### 社長の方針メモ
 - 社長は1人社長で、意思決定権を持つ
 - 秘書（Claude Code）が各部門長（Agent）に最適な指示を委譲する構図
