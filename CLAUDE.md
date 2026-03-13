@@ -220,6 +220,29 @@ Agent(
 - ツール許可プロンプトが出るので、初回は「Yes, and don't ask again」で自動化すること
 - Agent ツールでの部門委譲は、CLAUDE.mdなしでも秘書が直接ファイル読み→報告に簡略化される場合がある（リポジトリ内のため）
 
+### Web版Claude CodeからのSlack報告方法（スキル）
+
+Web版（GitHub連携）ではSlack MCPが使えないため、Bot Token + curl で直接APIを叩く:
+
+1. `.env` ファイルから `SLACK_BOT_TOKEN` を読み込む
+2. チャンネル一覧: `bash scripts/slack-channels.sh`
+3. メッセージ送信: `bash scripts/slack-post.sh general "メッセージ"`
+4. または直接curl:
+```bash
+source .env
+curl -s -X POST 'https://slack.com/api/chat.postMessage' \
+  -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+  -H 'Content-Type: application/json; charset=utf-8' \
+  -d '{"channel":"C0A96UBMDC5","text":"メッセージ内容"}'
+```
+
+**チャンネルID一覧**:
+- `C0A96UBMDC5` = #general
+- `C0A9DV4LZFE` = #random
+- `C0A940E3YRZ` = #看板
+
+**注意**: `.env` はgitignore済み。トークンはコミットしないこと。
+
 ### 社長の方針メモ
 - 社長は1人社長で、意思決定権を持つ
 - 秘書（Claude Code）が各部門長（Agent）に最適な指示を委譲する構図
