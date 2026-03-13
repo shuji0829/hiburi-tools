@@ -254,6 +254,23 @@ curl -s -X POST 'https://slack.com/api/chat.postMessage' \
 
 **注意**: `.env` はgitignore済み。トークンはコミットしないこと。
 
+### Slack読み取り・フィードバック確認方法（スキル）
+
+秘書が社長のSlack返信を確認し、部門にフィードバックするためのスクリプト:
+
+1. **チャンネル最新メッセージ取得**: `bash scripts/slack-read.sh general [件数]`
+   - 件数省略時はデフォルト5件
+   - 例: `bash scripts/slack-read.sh general 10`
+2. **スレッド返信取得**: `bash scripts/slack-thread.sh general <timestamp>`
+   - timestampはslack-read.shの出力やslack-post.shの返り値(ts)から取得
+   - 例: `bash scripts/slack-thread.sh general 1773442136.934349`
+
+**フィードバックフロー**:
+1. 秘書がSlackに報告を投稿（`slack-post.sh`）
+2. 社長がSlackで返信
+3. 秘書が `slack-read.sh` または `slack-thread.sh` で社長の返信を確認
+4. 返信内容を該当部門にAgentツールで伝達（CLAUDE.mdのフィードバック伝達フォーマットを使用）
+
 ### Web版Claude CodeでのPR作成・マージ手順（スキル）
 
 Web版では `gh` コマンドが使えないため、ブラウザ操作でPR作成・マージを行う:
