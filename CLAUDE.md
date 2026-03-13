@@ -196,14 +196,29 @@ Agent(
 
 ### 保留事項（TODO）
 - [x] **Slack MCP接続テスト**: 2026-03-13 完了。ローカルClaude Code v2.1.70 で接続確認済み（`claude.ai Slack · connected`）。IPv4優先設定（`NODE_OPTIONS=--dns-result-order=ipv4first`）が必要
-- [ ] **サンプル指示でのフルフロー実行テスト**: 社長→秘書→部門委譲→Slack報告→フィードバック伝達の一連の流れを確認
+- [x] **サンプル指示でのフルフロー実行テスト**: 2026-03-13 実施中。秘書→開発部委譲→Slack報告のフローが動作確認済み
 - [x] **Incoming Webhook方式の検討**: MCP方式で接続成功したため不要
 
 ### ローカルClaude Code接続メモ
 - **IPv6問題**: 日本のネットワークでは `api.anthropic.com` へのIPv6接続が失敗する場合あり
 - **対処法**: 起動前に `set NODE_OPTIONS=--dns-result-order=ipv4first` を実行
 - **接続済みMCP**: Asana, Canva, Figma, Gmail, Google Calendar, Slack
-- **未接続MCP**: Box, monday.com（要認証）、Notion（failed）
+- **接続済みMCP（追加）**: Notion（2026-03-13 再認証完了）
+- **未接続MCP**: Box, monday.com（要認証）
+
+### ローカルClaude Code起動手順（スキル）
+1. `git clone https://github.com/shuji0829/hiburi-tools.git`（初回のみ）
+2. `cd hiburi-tools`（`C:\Users\shuji\hiburi-tools`）
+3. `set NODE_OPTIONS=--dns-result-order=ipv4first`
+4. `claude`
+5. CLAUDE.mdが自動読み込みされ、秘書モードで起動
+6. Slack MCP等のツール許可は初回「Yes, and don't ask again」を選択 → 以降自動許可
+
+### フルフロー実行の学び（スキル）
+- 秘書はCLAUDE.mdを読み、指示を分析→部門委譲→Slack報告を自律実行する
+- Slack MCPは `Search channels` → `Send message` の順で実行される
+- ツール許可プロンプトが出るので、初回は「Yes, and don't ask again」で自動化すること
+- Agent ツールでの部門委譲は、CLAUDE.mdなしでも秘書が直接ファイル読み→報告に簡略化される場合がある（リポジトリ内のため）
 
 ### 社長の方針メモ
 - 社長は1人社長で、意思決定権を持つ
