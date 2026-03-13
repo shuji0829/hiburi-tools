@@ -195,9 +195,15 @@ Agent(
    - 品質管理なし → 各部門の成果物基準＋報告義務を整備
 
 ### 保留事項（TODO）
-- [ ] **Slack MCP接続テスト**: `.mcp.json` は設定済み。社長のローカル環境で `claude mcp add --transport http slack https://mcp.slack.com/mcp` → OAuth認証 → `/mcp` で接続確認が必要
+- [x] **Slack MCP接続テスト**: 2026-03-13 完了。ローカルClaude Code v2.1.70 で接続確認済み（`claude.ai Slack · connected`）。IPv4優先設定（`NODE_OPTIONS=--dns-result-order=ipv4first`）が必要
 - [ ] **サンプル指示でのフルフロー実行テスト**: 社長→秘書→部門委譲→Slack報告→フィードバック伝達の一連の流れを確認
-- [ ] **Incoming Webhook方式の検討**: MCP方式が使えない場合の代替としてWebhook URLを環境変数で管理する方式も選択肢
+- [x] **Incoming Webhook方式の検討**: MCP方式で接続成功したため不要
+
+### ローカルClaude Code接続メモ
+- **IPv6問題**: 日本のネットワークでは `api.anthropic.com` へのIPv6接続が失敗する場合あり
+- **対処法**: 起動前に `set NODE_OPTIONS=--dns-result-order=ipv4first` を実行
+- **接続済みMCP**: Asana, Canva, Figma, Gmail, Google Calendar, Slack
+- **未接続MCP**: Box, monday.com（要認証）、Notion（failed）
 
 ### 社長の方針メモ
 - 社長は1人社長で、意思決定権を持つ
