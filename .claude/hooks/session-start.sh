@@ -16,6 +16,11 @@ if ! command -v curl &> /dev/null; then
   apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1
 fi
 
+# Generate .env from GitHub Secrets if not present
+if [ ! -f "$CLAUDE_PROJECT_DIR/.env" ] && [ -n "${SLACK_BOT_TOKEN:-}" ]; then
+  echo "SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}" > "$CLAUDE_PROJECT_DIR/.env"
+fi
+
 # Load .env into session environment if available
 if [ -f "$CLAUDE_PROJECT_DIR/.env" ] && [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   while IFS= read -r line; do
