@@ -271,6 +271,27 @@ Web版では `gh` コマンドが使えないため、ブラウザ操作でPR作
 - 1人社長体制のためレビュー承認は不要、そのままマージ可能
 - Web版からは `gh` コマンド・GitHub API認証ともに使えない
 
+### Web版Slack自動設定の仕組み（スキル）
+
+Web版Claude Codeではセッションごとに環境がクリーン初期化されるため、`.env`（gitignore済み）が消失する。
+これを解決するため、**GitHub Secrets + SessionStartフック**で `.env` を自動生成する仕組みを導入済み。
+
+**仕組み**:
+1. GitHub Secretsに `SLACK_BOT_TOKEN` を登録（Actions + Codespaces 両方）
+2. SessionStartフック（`.claude/hooks/session-start.sh`）がセッション開始時に実行
+3. `.env` が存在しない場合、環境変数 `SLACK_BOT_TOKEN` から `.env` を自動生成
+4. `scripts/slack-post.sh` 等が `.env` を読み込んでSlack投稿可能になる
+
+**トラブルシューティング**:
+- `.env` が生成されない → GitHub Secretsの登録を確認（Actions / Codespaces 両方）
+- フックが実行されない → `.claude/settings.json` の `SessionStart` 設定を確認
+- トークン更新時 → GitHub Secretsの値を更新すれば次回セッションから反映
+
+**設定場所**:
+- GitHub Secrets: `https://github.com/shuji0829/hiburi-tools/settings/secrets`
+- フック: `.claude/hooks/session-start.sh`
+- 設定: `.claude/settings.json`
+
 ### 社長の方針メモ
 - 社長は1人社長で、意思決定権を持つ
 - 秘書（Claude Code）が各部門長（Agent）に最適な指示を委譲する構図
