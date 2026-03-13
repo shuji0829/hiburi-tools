@@ -220,11 +220,22 @@ Agent(
 - ツール許可プロンプトが出るので、初回は「Yes, and don't ask again」で自動化すること
 - Agent ツールでの部門委譲は、CLAUDE.mdなしでも秘書が直接ファイル読み→報告に簡略化される場合がある（リポジトリ内のため）
 
+### Web版Claude Code: Slack自動設定（GitHub Secrets方式）
+
+SessionStartフック（`.claude/hooks/session-start.sh`）が、GitHub Secretsに登録された
+`SLACK_BOT_TOKEN` 環境変数から `.env` を自動生成する。
+
+**初回セットアップ（社長がブラウザで実施）**:
+1. GitHub → `shuji0829/hiburi-tools` → Settings → Secrets and variables → Actions
+2. 「New repository secret」をクリック
+3. Name: `SLACK_BOT_TOKEN`、Value: Bot Tokenの値を入力 → 「Add secret」
+4. 以降、Web版セッション開始時に `.env` が自動生成され、Slack投稿が有効になる
+
 ### Web版Claude CodeからのSlack報告方法（スキル）
 
 Web版（GitHub連携）ではSlack MCPが使えないため、Bot Token + curl で直接APIを叩く:
 
-1. `.env` ファイルから `SLACK_BOT_TOKEN` を読み込む
+1. `.env` ファイルから `SLACK_BOT_TOKEN` を読み込む（GitHub Secretsから自動生成）
 2. チャンネル一覧: `bash scripts/slack-channels.sh`
 3. メッセージ送信: `bash scripts/slack-post.sh general "メッセージ"`
 4. または直接curl:
