@@ -196,7 +196,7 @@ Agent(
 
 ### 保留事項（TODO）
 - [x] **Slack MCP接続テスト**: 2026-03-13 完了。ローカルClaude Code v2.1.70 で接続確認済み（`claude.ai Slack · connected`）。IPv4優先設定（`NODE_OPTIONS=--dns-result-order=ipv4first`）が必要
-- [x] **サンプル指示でのフルフロー実行テスト**: 2026-03-13 実施中。秘書→開発部委譲→Slack報告のフローが動作確認済み
+- [x] **サンプル指示でのフルフロー実行テスト**: 2026-03-13 完了。秘書→リポジトリ確認→Slack #general 報告成功（Slack MCP: Search channels → Send message）
 - [x] **Incoming Webhook方式の検討**: MCP方式で接続成功したため不要
 
 ### ローカルClaude Code接続メモ
